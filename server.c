@@ -252,88 +252,94 @@ void acceptconnect(int listen_fd, int event, void *arg)
 /*接收数据*/
 void recvdata(int client_fd, int event, void *arg)
 {
-	int              read_len;
+	int				read_len;
+	int 			target_pos = -1;
+	int  			target_fd  = -1;
 	struct my_events *ev = (struct my_events *)arg;
-	struct my_events *p_tar = (struct my_events*)ep_events[MAX_EVENTS-1].p_target;
-	read_len = Readline(client_fd,ev->m_buf,sizeof(ev->m_buf));
+	read_len = Readline_star(client_fd,ev->m_buf,sizeof(ev->m_buf));
 	//从红黑树拿下
 	// eventdel(ep_fd, ev);                                      
 
-	if (read_len >0)
+	if (read_len > 0)
 	{
-		if(ev->m_buf[1] == '#' && ev->m_buf[2] == '#' && ev->m_buf[6+ev->m_buf[6]+3] == '$' && ev->m_buf[6+ev->m_buf[6]+4] == '$')
+		if(ev->m_buf[0] == '#' && ev->m_buf[1] == '#' && ev->m_buf[5+ev->m_buf[5]+3] == '$' && ev->m_buf[5+ev->m_buf[5]+4] == '$')
 		{
-			ev->soft_target_addr = ev->m_buf[3];
-			ev->soft_source_addr = ev->m_buf[4]; 
-			if(ev->soft_target_addr == 0X00)
-			{
-				//Send info to Host From Client
-				printf("Form Client:\n");
-				if(p_tar != NULL && p_tar->m_status != 0)
-				{
-					printf("server_fd:%d\tclient_fd:%d\n",p_tar->m_fd,client_fd); 
-					Write(p_tar->m_fd,ev->m_buf,read_len);// 写到主控段
-					Write(client_fd,"YES SEND:",sizeof("YES SEND:"));//写回客户端
-					Write(client_fd,ev->m_buf,read_len);//写回客户端
-				}else{
-					Write(client_fd,"NO HOST",sizeof("NO HOST"));//写回客户端
-					Write(client_fd,ev->m_buf,read_len);//写回客户端
-				}
-				Write(STDOUT_FILENO,ev->m_buf,read_len); //在服务器显示
-			}
-			else if(ev->soft_target_addr == 0XFF)
+			ev->soft_target_addr = ev->m_buf[2];
+			ev->soft_source_addr = ev->m_buf[3]; 
+
+			if(ev->soft_target_addr == 0XFF)
 			{
 				//From Server,Set Host
-				if(ev->soft_source_addr == 0X00 && ev->m_buf[6] == 0X07)
+				if(ev->soft_source_addr == 0X00 && ev->m_buf[5] == 0X07)
 				{
-					if(ev->m_buf[7] == 'Y' && ev->m_buf[8] == 'E' && ev->m_buf[9]== 'S')
-					{
-						ep_events[MAX_EVENTS-1].p_target = ev;                        
-						Write(client_fd,"YES HOST",sizeof("YES HOST"));//写回客户端
-						Write(STDOUT_FILENO,"YESHOST\n",8);
+					if(ev->m_buf[6] == 'Y' && ev->m_buf[7] == 'E' && ev->m_buf[8]== 'S')
+					{						           
+						Write(client_fd,"YES HOST\r\n",sizeof("YES HOST\r\n"));//写回客户端
+						printf("HOST FD: %d\n",client_fd);
 					}
-					if(ev->m_buf[7] == 'N' && ev->m_buf[8] == 'O' && ev->m_buf[9]== 'T')
-					{
-						ep_events[MAX_EVENTS-1].p_target = NULL;                        
-						Write(client_fd,"NOT HOST",sizeof("NOT HOST"));//写回客户端
-						Write(STDOUT_FILENO,"NOTHOST\n",8);
+					if(ev->m_buf[6] == 'N' && ev->m_buf[7] == 'O' && ev->m_buf[8]== 'T')
+					{                    
+						Write(client_fd,"NOT HOST\r\n",sizeof("NOT HOST\r\n"));//写回客户端
+						printf("NOT HOST!!\n");
 					}
 				}
 				else //From Server, Broadcast
 				{
-					Write(STDOUT_FILENO,"BROADCAST\n",10);
+					printf("target_fd:%d\tclient_fd:%d\ninfo:",target_fd,client_fd); //16进制显示发送的内容
+					for (int i = 0; i < read_len; ++i)
+					{
+						printf("  %X",ev->m_buf[i]);
+					}
+					printf("\n");
+
+					for(i = 0;i<MAX_EVENTS;i++) //找出目的地址
+					{
+						if(ep_events[i].m_status == 1 && ep_events[i].m_fd != client_fd) //除去本身
+						{
+							Write(ep_events[i].m_fd,ev->m_buf,read_len);// 循环写到target
+						}
+					}
+					printf("BROADCAST\n");
 				}
 			}
 			else
 			{
-				//Send Commend From Server to Cilent
-				int target_pos =-1 ,i;
-				for(i = 0;i<MAX_EVENTS-1;i++) //找出目的地址
+				for(i = 0;i<MAX_EVENTS;i++) //找出目的地址
 				{
 					if(ep_events[i].soft_source_addr == ev->soft_target_addr)
 					{
-						target_pos =i;				
+						target_pos = i;				
 						break;
 					}
 				}
-				printf("From Server:\n");
-				if(target_pos != -1 && ep_events[target_pos].m_status ==1)
+				if(target_pos != -1 && ep_events[target_pos].m_status == 1)
 				{
-					printf("server_fd:%d\tclient_fd:%d\n",p_tar->m_fd,client_fd); 
-					Write(ep_events[target_pos].m_fd,ev->m_buf,read_len);
+					target_fd = ep_events[target_pos].m_fd;  //找到目标fd
+					//Send info to Host From Client
+					printf("target_fd:%d\tclient_fd:%d\ninfo:",target_fd,client_fd);
+					for (int i = 0; i < read_len; ++i)
+					{
+						printf("  %X",ev->m_buf[i]);
+					}
+					printf("\n");
+
+					Write(target_fd,ev->m_buf,read_len);// 写到target
 					Write(client_fd,"YES SEND",sizeof("YES SEND"));//写回客户端
-					Write(client_fd,ev->m_buf,read_len);//写回客户端
-				}else
-				{
-					Write(client_fd,"NOT TARGET",sizeof("NOT TARGET"));//写回客户端
-					Write(client_fd,ev->m_buf,read_len);//写回客户端
+					//Write(client_fd,ev->m_buf,read_len);//写回客户端
 				}
-				Write(STDOUT_FILENO,ev->m_buf,read_len);
+				else{
+					Write(client_fd,"NOT TARGET",sizeof("NOT TARGET"));//写回发送端
+					//Write(client_fd,ev->m_buf,read_len);//写回发送端
+				}
 			}
 		}else{
 			//other info 
-			printf("other info:\n");
-			Write(STDOUT_FILENO,ev->m_buf,read_len);
+			printf("other info:");
+			for (int i = 0; i < read_len; ++i)
+			{
+				printf("  %X",ev->m_buf[i]);
+			}
+			printf("\n");
 			Write(client_fd,"FORM ERROR\n",sizeof("FORM ERROR\n"));//写回客户端
 			Write(client_fd,ev->m_buf,read_len);
 		}
@@ -341,7 +347,7 @@ void recvdata(int client_fd, int event, void *arg)
 		ev->m_lasttime = time(NULL);
 		//  ev->m_buf[read_len] = '\0';           //手动添加结束标记
 		//  printf("\n Client[%d]: %s \n", client_fd, ev->m_buf);
-		//  ev->m_buf_len =0;
+
 		//     eventsetinit(ev, client_fd, senddata, ev);            //放上红黑树,监听写事件
 		//     eventadd(ep_fd, EPOLLOUT, ev); 
 	}
@@ -349,17 +355,14 @@ void recvdata(int client_fd, int event, void *arg)
 	{
 		close(ev->m_fd);
 		eventdel(ep_fd, ev);
-		printf("\n [Client:%d] disconnection \n", ev->m_fd);
-		ev->m_status = 0;
+		printf("\n [Addr_ID:%d] [Client:%d] Disconnection \n",ev->soft_source_addr,ev->m_fd);
 	}
 	else
 	{
 		close(ev->m_fd);
 		eventdel(ep_fd, ev);
-		printf("\n error: [Client:%d] disconnection\n", ev->m_fd);
-		ev->m_status = 0;
+		printf("\n [Addr_ID:%d] [Client:%d] Disconnection \n",ev->soft_source_addr,ev->m_fd);
 	}
-
 	return ;
 }
 /*发送数据*/
