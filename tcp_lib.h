@@ -30,4 +30,8 @@ ssize_t Writen(int fd, const void *vptr, size_t n);
 
 ssize_t Readline(int fd, void *vptr, ssize_t maxlen);
 
+size_t Readframe(void *vptr,unsigned char star_byte,ssize_t read_line_length);
+
+ssize_t Readline_star(int fd, void *vptr, ssize_t maxlen);
+
 #endif
